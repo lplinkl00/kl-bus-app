@@ -86,7 +86,7 @@ const INITIAL_VIEW_STATE: ViewState = {
 };
 
 // Update interval in milliseconds (API updates every 30 seconds)
-const UPDATE_INTERVAL = 30000;
+const UPDATE_INTERVAL = 45000;
 
 export default function BusMap() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
