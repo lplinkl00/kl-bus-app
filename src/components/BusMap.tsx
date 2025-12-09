@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import MapGL from 'react-map-gl/mapbox';
 import DeckGL from '@deck.gl/react';
-import { ScatterplotLayer } from '@deck.gl/layers';
-import { ScenegraphLayer } from '@deck.gl/mesh-layers';
+import { ScatterplotLayer, IconLayer } from '@deck.gl/layers';
+// import { ScenegraphLayer } from '@deck.gl/mesh-layers';
 import type { PickingInfo } from '@deck.gl/core';
 
 import { fetchMultipleAgencies } from '../services/gtfsRealtime';
@@ -101,45 +101,88 @@ export default function BusMap() {
   const [loadingStatic, setLoadingStatic] = useState<boolean>(true);
   const [viewState, setViewState] = useState<ViewState>(INITIAL_VIEW_STATE);
   const [glError, setGlError] = useState<string | null>(null);
-  const [busModel, setBusModel] = useState<any>(null); // GLTF model type from loaders.gl
+  // const [busModel, setBusModel] = useState<any>(null); // GLTF model type from loaders.gl - COMMENTED OUT: Using 2D icons
   
   // Combined loading state - map only shows when both are ready
   const isLoading = loadingRealtime || loadingStatic;
   
-  // Load the bus 3D model
+  // Load the bus 3D model - COMMENTED OUT: Using 2D icons instead
+  // useEffect(() => {
+  //   const loadBusModel = async () => {
+  //     try {
+  //       // Dynamically import loaders to avoid breaking the component if they fail
+  //       const { load } = await import('@loaders.gl/core');
+  //       const { GLTFLoader } = await import('@loaders.gl/gltf');
+  //       
+  //       // Use import.meta.url to get the correct path in Vite
+  //       // The GLTFLoader will automatically load the referenced scene.bin file
+  //       const modelUrl = new URL('../assets/scene.gltf', import.meta.url).href;
+  //       const model = await load(modelUrl, GLTFLoader, {
+  //         // GLTFLoader options - it will automatically resolve scene.bin relative to scene.gltf
+  //         gltf: {
+  //           loadBuffers: true, // Ensure binary buffers are loaded
+  //           loadImages: false, // No images in this model
+  //         }
+  //       });
+  //       if (model) {
+  //         // GLTFLoader returns the parsed model, extract the scene
+  //         // Type assertion for GLTF model structure
+  //         const gltfModel = model as any;
+  //         const scene = (gltfModel.scenes && gltfModel.scenes[0]) || gltfModel;
+  //         setBusModel(scene);
+  //         console.log('Bus 3D model loaded successfully with binary data');
+  //       }
+  //     } catch (error) {
+  //       console.warn('Could not load 3D bus model, using fallback markers:', error);
+  //       console.warn('To use 3D models, install: npm install @loaders.gl/core @loaders.gl/gltf');
+  //       // Continue without 3D model - will use scatterplot fallback
+  //       setBusModel(null);
+  //     }
+  //   };
+  //   loadBusModel();
+  // }, []);
+
+  // Load bus icon from assets
+  const [busIconAtlas, setBusIconAtlas] = useState<string | null>(null);
+  const [busIconSize, setBusIconSize] = useState<{ width: number; height: number } | null>(null);
+  
   useEffect(() => {
-    const loadBusModel = async () => {
+    // Load the bus.png image from assets
+    const loadBusIcon = async () => {
       try {
-        // Dynamically import loaders to avoid breaking the component if they fail
-        const { load } = await import('@loaders.gl/core');
-        const { GLTFLoader } = await import('@loaders.gl/gltf');
-        
         // Use import.meta.url to get the correct path in Vite
-        // The GLTFLoader will automatically load the referenced scene.bin file
-        const modelUrl = new URL('../assets/scene.gltf', import.meta.url).href;
-        const model = await load(modelUrl, GLTFLoader, {
-          // GLTFLoader options - it will automatically resolve scene.bin relative to scene.gltf
-          gltf: {
-            loadBuffers: true, // Ensure binary buffers are loaded
-            loadImages: false, // No images in this model
+        const iconUrl = new URL('../assets/bus.png', import.meta.url).href;
+        
+        // Create an image element to load the icon
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        
+        img.onload = () => {
+          // Create a canvas to convert the image to a data URL
+          const canvas = document.createElement('canvas');
+          canvas.width = img.width;
+          canvas.height = img.height;
+          const ctx = canvas.getContext('2d');
+          
+          if (ctx) {
+            ctx.drawImage(img, 0, 0);
+            const dataUrl = canvas.toDataURL();
+            setBusIconAtlas(dataUrl);
+            setBusIconSize({ width: img.width, height: img.height });
           }
-        });
-        if (model) {
-          // GLTFLoader returns the parsed model, extract the scene
-          // Type assertion for GLTF model structure
-          const gltfModel = model as any;
-          const scene = (gltfModel.scenes && gltfModel.scenes[0]) || gltfModel;
-          setBusModel(scene);
-          console.log('Bus 3D model loaded successfully with binary data');
-        }
+        };
+        
+        img.onerror = () => {
+          console.warn('Failed to load bus icon from assets/bus.png');
+        };
+        
+        img.src = iconUrl;
       } catch (error) {
-        console.warn('Could not load 3D bus model, using fallback markers:', error);
-        console.warn('To use 3D models, install: npm install @loaders.gl/core @loaders.gl/gltf');
-        // Continue without 3D model - will use scatterplot fallback
-        setBusModel(null);
+        console.warn('Error loading bus icon:', error);
       }
     };
-    loadBusModel();
+    
+    loadBusIcon();
   }, []);
 
   // Define which agencies to fetch data from
@@ -444,26 +487,66 @@ export default function BusMap() {
     //   );
     // }
     
-    // Bus positions layer - shows 3D bus models or fallback to markers
+    // Bus positions layer - shows 2D bus icons
     // Use filteredBuses if search is active, otherwise show all valid buses
     const busesToShow = searchQuery.trim() ? filteredBuses : validBusPositions;
     if (busesToShow && busesToShow.length > 0) {
-      if (busModel) {
-        // Use 3D GLTF model with ScenegraphLayer
+      // COMMENTED OUT: 3D GLTF model with ScenegraphLayer
+      // if (busModel) {
+      //   // Use 3D GLTF model with ScenegraphLayer
+      //   layerList.push(
+      //     new ScenegraphLayer<BusPosition>({
+      //       id: 'buses-layer',
+      //       data: busesToShow,
+      //       scenegraph: busModel,
+      //       getPosition: d => [d.longitude, d.latitude],
+      //       getOrientation: d => [0, -d.bearing || 0, 90], // [pitch, yaw, roll] - yaw uses bearing, roll 90 to orient model correctly
+      //       getScale: () => [15, 15, 15] as [number, number, number], // Scale factor - adjust based on model size (meters)
+      //       sizeScale: 1,
+      //       _animations: {
+      //         '*': {
+      //           speed: 1
+      //         }
+      //       },
+      //       pickable: true,
+      //       autoHighlight: true, // Highlight on hover/touch
+      //       highlightColor: [255, 200, 0, 200], // Yellow highlight
+      //       onClick: handleBusClick,
+      //       onHover: (_info: PickingInfo) => {
+      //         // Optional: could add hover effects here
+      //       },
+      //     })
+      //   );
+      // } else {
+      
+      // Use 2D bus icons with IconLayer
+      if (busIconAtlas && busIconSize) {
         layerList.push(
-          new ScenegraphLayer<BusPosition>({
+          new IconLayer<BusPosition>({
             id: 'buses-layer',
             data: busesToShow,
-            scenegraph: busModel,
-            getPosition: d => [d.longitude, d.latitude],
-            getOrientation: d => [0, -d.bearing || 0, 90], // [pitch, yaw, roll] - yaw uses bearing, roll 90 to orient model correctly
-            getScale: () => [15, 15, 15] as [number, number, number], // Scale factor - adjust based on model size (meters)
-            sizeScale: 1,
-            _animations: {
-              '*': {
-                speed: 1
+            iconAtlas: busIconAtlas,
+            iconMapping: {
+              marker: {
+                x: 0,
+                y: 0,
+                width: busIconSize.width,
+                height: busIconSize.height,
+                anchorY: busIconSize.height / 2, // Anchor point at center for proper rotation
+                anchorX: busIconSize.width / 2,
               }
             },
+            getIcon: () => 'marker',
+            getPosition: d => [d.longitude, d.latitude],
+            getAngle: d => -d.bearing || 0, // Rotate icon based on bearing
+            getSize: () => isMobile ? 32 : 28, // Icon size in pixels
+            getColor: d => 
+              highlightedBusId && d.id === highlightedBusId
+                ? [255, 200, 0, 255] // Yellow tint for highlighted/searched bus
+                : [255, 255, 255, 255], // White (no tint, use original icon colors)
+            sizeScale: 1,
+            sizeMinPixels: isMobile ? 24 : 20,
+            sizeMaxPixels: isMobile ? 40 : 36,
             pickable: true,
             autoHighlight: true, // Highlight on hover/touch
             highlightColor: [255, 200, 0, 200], // Yellow highlight
@@ -474,7 +557,7 @@ export default function BusMap() {
           })
         );
       } else {
-        // Fallback to scatterplot markers if model not loaded
+        // Fallback to scatterplot markers if icon not loaded
         layerList.push(
           new ScatterplotLayer<BusPosition>({
             id: 'buses-layer',
@@ -526,7 +609,7 @@ export default function BusMap() {
     }
     
     return layerList;
-  }, [routes, validBusPositions, validStops, selectedStop, handleStopClick, handleBusClick, busModel, isMobile, searchQuery, filteredBuses, highlightedBusId, getStopColor]);
+  }, [routes, validBusPositions, validStops, selectedStop, handleStopClick, handleBusClick, busIconAtlas, isMobile, searchQuery, filteredBuses, highlightedBusId, getStopColor]);
 
   // Close search results when clicking outside
   useEffect(() => {

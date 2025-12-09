@@ -120,6 +120,7 @@ bus-trips/
 
 "Low Poly Bus" (https://skfb.ly/oVWOM) by MHKstudio is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).
 
+(https://www.flaticon.com/free-icons/bus) "bus icons" Bus icons created by Freepik - Flaticon
 ## License
 
 MIT
