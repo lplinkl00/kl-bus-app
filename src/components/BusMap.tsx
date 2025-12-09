@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import MapGL from 'react-map-gl/mapbox';
 import DeckGL from '@deck.gl/react';
-import { ScatterplotLayer, IconLayer } from '@deck.gl/layers';
+import { ScatterplotLayer, IconLayer, PathLayer } from '@deck.gl/layers';
+import { PathStyleExtension } from '@deck.gl/extensions';
 // import { ScenegraphLayer } from '@deck.gl/mesh-layers';
 import type { PickingInfo } from '@deck.gl/core';
 
@@ -99,6 +100,7 @@ export default function BusMap() {
   const [showSearchResults, setShowSearchResults] = useState<boolean>(false);
   const [loadingRealtime, setLoadingRealtime] = useState<boolean>(true);
   const [loadingStatic, setLoadingStatic] = useState<boolean>(true);
+  const [routeProgress, setRouteProgress] = useState<{ current: number; total: number } | null>(null);
   const [viewState, setViewState] = useState<ViewState>(INITIAL_VIEW_STATE);
   const [glError, setGlError] = useState<string | null>(null);
   // const [busModel, setBusModel] = useState<any>(null); // GLTF model type from loaders.gl - COMMENTED OUT: Using 2D icons
@@ -254,14 +256,20 @@ export default function BusMap() {
   }, [agencies]);
   
   // Fetch route paths (only once on mount)
+  // Uses Google Routes API to get road-following paths, cached in session storage
   const fetchRoutesData = useCallback(async () => {
     try {
-      const routesData = await fetchMultipleAgencyRoutes(agencies);
+      setRouteProgress({ current: 0, total: 0 });
+      const routesData = await fetchMultipleAgencyRoutes(agencies, (current, total) => {
+        setRouteProgress({ current, total });
+      });
       setRoutes(routesData);
+      setRouteProgress(null);
     } catch (error) {
       console.error('Error fetching routes:', error);
       // Set empty array on error so loading can complete
       setRoutes([]);
+      setRouteProgress(null);
     }
   }, [agencies]);
   
@@ -470,22 +478,25 @@ export default function BusMap() {
   const layers = useMemo(() => {
     const layerList = [];
     
-    // Route paths layer (static routes) - hidden/invisible
-    // Routes are kept in the data structure but not rendered
-    // if (routes && routes.length > 0) {
-    //   layerList.push(
-    //     new PathLayer({
-    //       id: 'routes-layer',
-    //       data: routes,
-    //       getPath: d => d.path,
-    //       getColor: [100, 100, 100, 100], // Gray, semi-transparent
-    //       widthMinPixels: 2,
-    //       widthMaxPixels: 4,
-    //       capRounded: true,
-    //       jointRounded: true,
-    //     })
-    //   );
-    // }
+    // Route paths layer (static routes) - dotted white line showing bus routes
+    if (routes && routes.length > 0) {
+      layerList.push(
+        new PathLayer<Route>({
+          id: 'routes-layer',
+          data: routes,
+          getPath: d => d.path,
+          getColor: [255, 255, 255, 150], // White, semi-transparent
+          getWidth: 4,
+          widthMinPixels: 2,
+          widthMaxPixels: 6,
+          capRounded: true,
+          jointRounded: true,
+          getDashArray: [8, 6], // Dotted pattern: 8px dash, 6px gap (more visible)
+          dashJustified: true,
+          extensions: [new PathStyleExtension({ dash: true })],
+        })
+      );
+    }
     
     // Bus positions layer - shows 2D bus icons
     // Use filteredBuses if search is active, otherwise show all valid buses
@@ -701,7 +712,11 @@ export default function BusMap() {
                 {loadingStatic ? '⏳' : '✓'}
               </div>
               <span style={{ flex: 1, textAlign: 'left' }}>
-                {loadingStatic ? 'Loading routes and stops...' : 'Static data ready'}
+                {loadingStatic 
+                  ? (routeProgress 
+                      ? `Computing routes: ${routeProgress.current} / ${routeProgress.total} (using Google Routes API)`
+                      : 'Loading routes and stops...')
+                  : 'Static data ready'}
               </span>
             </div>
           </div>
@@ -718,7 +733,9 @@ export default function BusMap() {
               <div style={{
                 height: '100%',
                 background: 'white',
-                width: loadingRealtime && loadingStatic ? '50%' : loadingRealtime || loadingStatic ? '75%' : '100%',
+                width: routeProgress && routeProgress.total > 0
+                  ? `${(routeProgress.current / routeProgress.total) * 100}%`
+                  : loadingRealtime && loadingStatic ? '50%' : loadingRealtime || loadingStatic ? '75%' : '100%',
                 transition: 'width 0.3s ease',
                 borderRadius: '2px',
               }} />

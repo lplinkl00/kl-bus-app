@@ -473,17 +473,22 @@ function compileStopTimesFromCSV(stopTimesText: string): Map<string, StopSequenc
 
 /**
  * Creates route paths from stops and stop sequences
- * Connects stops in sequence to form paths
+ * Uses Google Routes API to get road-following paths, with caching
  * @param stops - Array of stop objects with id, latitude, longitude
  * @param tripToStopsMap - Map of trip_id to stop sequences
  * @param tripToRouteMap - Map of trip_id to route info
- * @returns Array of route path objects
+ * @param onProgress - Optional progress callback
+ * @returns Promise resolving to array of route path objects
  */
-function compileRoutesFromStops(
+async function compileRoutesFromStops(
   stops: Stop[],
   tripToStopsMap: Map<string, StopSequence[]>,
-  tripToRouteMap: Map<string, TripInfo>
-): Route[] {
+  tripToRouteMap: Map<string, TripInfo>,
+  onProgress?: (current: number, total: number) => void
+): Promise<Route[]> {
+  // Import Google Routes API service
+  const { getRoutePath } = await import('./googleRoutes');
+  
   // Create a map of stop_id to stop coordinates for quick lookup
   const stopsMap = new Map<string, { latitude: number; longitude: number }>();
   stops.forEach(stop => {
@@ -493,49 +498,120 @@ function compileRoutesFromStops(
     });
   });
   
-  const routes: Route[] = [];
+  // Check session storage for cached routes
+  const sessionCacheKey = 'google_routes_cache';
+  let cachedRoutes: Map<string, Route> | null = null;
   
+  try {
+    const cached = sessionStorage.getItem(sessionCacheKey);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      cachedRoutes = new Map(parsed.map((r: Route) => [r.id, r]));
+      console.log(`Loaded ${cachedRoutes.size} cached routes from session`);
+    }
+  } catch (error) {
+    console.warn('Error loading cached routes:', error);
+  }
+  
+  const routes: Route[] = [];
+  const routesToFetch: Array<{ tripId: string; waypoints: Array<{ lat: number; lng: number }>; routeInfo: TripInfo }> = [];
+  
+  // Prepare routes for fetching
   tripToStopsMap.forEach((stopSequences, tripId) => {
     // Get route info for this trip
     const routeInfo = tripToRouteMap.get(tripId) || { tripId, routeId: null };
     
-    // Build path from stop sequences
-    const path: [number, number][] = [];
+    // Check cache first
+    if (cachedRoutes?.has(tripId)) {
+      routes.push(cachedRoutes.get(tripId)!);
+      return;
+    }
+    
+    // Build waypoints from stop sequences
+    const waypoints: Array<{ lat: number; lng: number }> = [];
     const timestamps: number[] = [];
     const baseTime = Date.now() / 1000;
     
     stopSequences.forEach((stopSeq, index) => {
       const stop = stopsMap.get(stopSeq.stopId);
       if (stop) {
-        path.push([stop.longitude, stop.latitude]);
+        waypoints.push({ lat: stop.latitude, lng: stop.longitude });
         // Generate timestamps - 30 seconds between stops
         timestamps.push(baseTime + index * 30);
       }
     });
     
-    // Only add routes with at least 2 stops
-    if (path.length >= 2) {
-      routes.push({
-        id: tripId,
-        path,
-        timestamps,
-        routeId: routeInfo.routeId,
-      });
+    // Only process routes with at least 2 stops
+    if (waypoints.length >= 2) {
+      routesToFetch.push({ tripId, waypoints, routeInfo });
     }
   });
+  
+  // Fetch routes using Google Routes API
+  if (routesToFetch.length > 0) {
+    console.log(`Fetching ${routesToFetch.length} routes from Google Routes API...`);
+    
+    let processed = 0;
+    for (const { tripId, waypoints, routeInfo } of routesToFetch) {
+      try {
+        const path = await getRoutePath(waypoints);
+        const baseTime = Date.now() / 1000;
+        const timestamps = waypoints.map((_, index) => baseTime + index * 30);
+        
+        const route: Route = {
+          id: tripId,
+          path,
+          timestamps,
+          routeId: routeInfo.routeId,
+        };
+        
+        routes.push(route);
+        processed++;
+        
+        if (onProgress) {
+          onProgress(processed, routesToFetch.length);
+        }
+      } catch (error) {
+        console.warn(`Error fetching route for trip ${tripId}:`, error);
+        // Fallback to straight line
+        const fallbackPath: [number, number][] = waypoints.map(wp => [wp.lng, wp.lat]);
+        const baseTime = Date.now() / 1000;
+        const timestamps = waypoints.map((_, index) => baseTime + index * 30);
+        
+        routes.push({
+          id: tripId,
+          path: fallbackPath,
+          timestamps,
+          routeId: routeInfo.routeId,
+        });
+      }
+    }
+    
+    // Cache routes in session storage
+    try {
+      const allRoutes = [...routes];
+      sessionStorage.setItem(sessionCacheKey, JSON.stringify(allRoutes));
+      console.log(`Cached ${allRoutes.length} routes in session storage`);
+    } catch (error) {
+      console.warn('Error caching routes:', error);
+    }
+  }
   
   return routes;
 }
 
 /**
  * Loads route data from cached GTFS files
+ * Uses Google Routes API to get road-following paths
  * @param agency - Agency name (e.g., 'prasarana', 'ktmb')
  * @param category - Optional category for Prasarana
+ * @param onProgress - Optional progress callback
  * @returns Promise resolving to array of route path objects ready for TripsLayer
  */
 export async function loadRouteData(
   agency: string = 'prasarana',
-  category: string = 'rapid-bus-kl'
+  category: string = 'rapid-bus-kl',
+  onProgress?: (current: number, total: number) => void
 ): Promise<Route[]> {
   try {
     // Load stops, trips, and stop_times from cache
@@ -555,8 +631,8 @@ export async function loadRouteData(
     const tripToRouteMap = compileTripsFromCSV(tripsText);
     const tripToStopsMap = compileStopTimesFromCSV(stopTimesText);
     
-    // Build routes from stops
-    return compileRoutesFromStops(stops, tripToStopsMap, tripToRouteMap);
+    // Build routes from stops using Google Routes API
+    return await compileRoutesFromStops(stops, tripToStopsMap, tripToRouteMap, onProgress);
   } catch (error) {
     console.error('Error loading route data:', error);
     return [];
@@ -565,32 +641,45 @@ export async function loadRouteData(
 
 /**
  * Fetches and compiles bus routes as paths for the Trips layer
- * Since shapes.txt is not available, builds paths from stops and stop sequences
+ * Uses Google Routes API to get road-following paths instead of straight lines
  * This function now uses the cache system
  * @param agency - Agency name (e.g., 'prasarana', 'ktmb')
  * @param category - Optional category for Prasarana
+ * @param onProgress - Optional progress callback
  * @returns Promise resolving to array of route path objects ready for TripsLayer
  */
 export async function fetchGTFSRoutes(
   agency: string = 'prasarana',
-  category: string = 'rapid-bus-kl'
+  category: string = 'rapid-bus-kl',
+  onProgress?: (current: number, total: number) => void
 ): Promise<Route[]> {
-  // Use the loadRouteData function which handles caching
-  return await loadRouteData(agency, category);
+  // Use the loadRouteData function which handles caching and Google Routes API
+  return await loadRouteData(agency, category, onProgress);
 }
 
 /**
  * Fetches routes for multiple agencies
  * @param agencies - Array of {agency, category} objects
+ * @param onProgress - Optional progress callback
  * @returns Promise resolving to combined array of all route paths
  */
-export async function fetchMultipleAgencyRoutes(agencies: Agency[]): Promise<Route[]> {
+export async function fetchMultipleAgencyRoutes(
+  agencies: Agency[],
+  onProgress?: (current: number, total: number) => void
+): Promise<Route[]> {
   const promises = agencies.map(({ agency, category }) => 
     fetchGTFSRoutes(agency, category)
   );
   
   const results = await Promise.all(promises);
-  return results.flat();
+  const allRoutes = results.flat();
+  
+  // Call progress callback if provided
+  if (onProgress) {
+    onProgress(allRoutes.length, allRoutes.length);
+  }
+  
+  return allRoutes;
 }
 
 /**
