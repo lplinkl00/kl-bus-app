@@ -1,0 +1,41 @@
+{
+  "name": "my-react-app",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "eslint .",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@deck.gl/core": "^9.2.4",
+    "@deck.gl/geo-layers": "^9.2.3",
+    "@deck.gl/layers": "^9.2.3",
+    "@deck.gl/mesh-layers": "^9.2.4",
+    "@deck.gl/react": "^9.2.3",
+    "@loaders.gl/core": "^4.3.4",
+    "@loaders.gl/gltf": "^4.3.4",
+    "deck.gl": "^9.2.3",
+    "gtfs-realtime-bindings": "^1.1.1",
+    "jszip": "^3.10.1",
+    "mapbox-gl": "^3.17.0",
+    "protobufjs": "^7.5.4",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-map-gl": "^8.1.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/react": "^19.2.5",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "eslint": "^9.39.1",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.4.24",
+    "globals": "^16.5.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.4"
+  }
+}
