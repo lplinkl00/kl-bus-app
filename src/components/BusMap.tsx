@@ -724,6 +724,18 @@ export default function BusMap() {
               }} />
             </div>
           )}
+          
+          <div style={{
+            marginTop: '30px',
+            padding: '12px',
+            background: 'rgba(255, 255, 255, 0.1)',
+            borderRadius: '8px',
+            fontSize: '13px',
+            opacity: 0.85,
+            lineHeight: '1.5',
+          }}>
+            <strong>ℹ️ Note:</strong> Bus positions are updated every 45 seconds.
+          </div>
         </div>
         
         <style>{`
