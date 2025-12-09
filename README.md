@@ -8,7 +8,8 @@ A React application that visualizes real-time bus positions from Malaysia's GTFS
 - 🗺️ Interactive map with deck.gl and Mapbox
 - 🎬 Animated bus movement with direction and speed visualization
 - 🚏 Bus stops display (when GTFS static data is available)
-- 🔄 Auto-refresh every 30 seconds
+- 🛣️ Road-following bus routes using Google Directions API (with session caching)
+- 🔄 Auto-refresh every 45 seconds
 
 ## Setup
 
@@ -18,17 +19,77 @@ A React application that visualizes real-time bus positions from Malaysia's GTFS
 npm install
 ```
 
-### 2. Get a Mapbox Access Token
+### 2. Get API Keys
+
+#### Mapbox Access Token
 
 1. Sign up for a free account at [Mapbox](https://account.mapbox.com/)
 2. Get your access token from the [Mapbox account page](https://account.mapbox.com/access-tokens/)
-3. Create a `.env` file in the `my-react-app` directory:
+
+#### Google Directions API Key (Optional but Recommended)
+
+The app uses Google Directions API to compute road-following bus routes instead of straight lines. This provides more accurate route visualization.
+
+1. Sign up for a [Google Cloud Platform](https://console.cloud.google.com/) account
+2. Create a new project or select an existing one
+3. Enable the [Directions API](https://console.cloud.google.com/apis/library/directions-backend.googleapis.com)
+4. Create an API key in the [Credentials page](https://console.cloud.google.com/apis/credentials)
+5. (Optional) Restrict the API key to only the Directions API for security
+
+**Note:** Without a Google Directions API key, routes will fall back to straight lines between stops. The app will still work, but routes won't follow roads.
+
+#### Environment Variables
+
+Create a `.env` file in the project root directory:
 
 ```env
 VITE_MAPBOX_TOKEN=your_mapbox_token_here
+VITE_GOOGLE_ROUTES_API_KEY=your_google_directions_api_key_here
+# OR use the alternative name:
+# VITE_GOOGLE_MAPS_API_KEY=your_google_directions_api_key_here
+
+# CORS Proxy Configuration (optional)
+# By default, Vite proxy is used in development to avoid CORS issues
+# Set to 'false' to disable Vite proxy
+VITE_USE_PROXY=true
+
+# To use cors-anywhere proxy server instead (run: npm run proxy)
+# Set to 'true' to use cors-anywhere proxy
+VITE_USE_CORS_PROXY=false
+# Custom cors-anywhere URL (default: http://localhost:8080)
+# VITE_CORS_PROXY_URL=http://localhost:8080
 ```
 
-Alternatively, you can edit `src/components/BusMap.jsx` and replace the default token (though it's recommended to use your own).
+**Note:** Routes are cached in session storage, so they're only computed once per browser session. This reduces API calls and improves performance.
+
+### 4. CORS Proxy Setup (Optional)
+
+If you encounter CORS (Cross-Origin Resource Sharing) errors when making API requests, the app includes two proxy solutions:
+
+#### Option 1: Vite Proxy (Recommended for Development)
+
+The Vite development server includes a built-in proxy that automatically handles CORS for Google Directions API requests. This is enabled by default in development mode and requires no additional setup.
+
+#### Option 2: CORS Anywhere Proxy Server
+
+For production or when you need more control, you can run a separate CORS proxy server:
+
+1. In a separate terminal, start the proxy server:
+   ```bash
+   npm run proxy
+   ```
+
+2. The server will run on `http://localhost:8080` by default
+
+3. Configure your `.env` file:
+   ```env
+   VITE_USE_CORS_PROXY=true
+   VITE_CORS_PROXY_URL=http://localhost:8080
+   ```
+
+4. The app will automatically use the cors-anywhere proxy for all API requests
+
+**Note:** The cors-anywhere proxy server is based on [cors-anywhere](https://github.com/Rob--W/cors-anywhere/) and adds CORS headers to proxied requests. Make sure to configure rate limiting and origin whitelisting if deploying to production.
 
 ### 3. Run the Application
 
@@ -94,6 +155,7 @@ Based on the [Malaysia Open API documentation](https://developer.data.gov.my/rea
 - react-map-gl - React wrapper for Mapbox GL
 - Mapbox GL - Map rendering
 - gtfs-realtime-bindings - Protocol Buffer parsing for GTFS Realtime
+- cors-anywhere - CORS proxy for API requests (dev dependency)
 
 ## Project Structure
 
@@ -104,7 +166,8 @@ bus-trips/
 │   │   └── BusMap.tsx       # Main map component
 │   ├── services/
 │   │   ├── gtfsRealtime.ts  # GTFS Realtime API service
-│   │   └── gtfsStatic.ts    # GTFS Static API service
+│   │   ├── gtfsStatic.ts    # GTFS Static API service
+│   │   └── googleRoutes.ts  # Google Directions API service for road-following routes
 │   ├── App.tsx
 │   └── main.tsx
 └── package.json
@@ -116,7 +179,12 @@ bus-trips/
 - The application tracks vehicle position history to create smooth animation trails
 - Bus stops are fetched from GTFS Static data (may require ZIP file parsing)
 - The map is centered on Kuala Lumpur by default
-- Animation speed and trail length can be adjusted in `BusMap.jsx`
+- Animation speed and trail length can be adjusted in `BusMap.tsx`
+- **Route Caching**: Bus routes are computed using Google Directions API and cached in session storage. Routes are only recalculated when:
+  - The browser session is cleared
+  - The cache is manually cleared
+  - Routes are not found in the cache
+- **Rate Limiting**: The app implements rate limiting for Google Directions API calls (40 requests/second) to avoid exceeding API quotas
 
 "Low Poly Bus" (https://skfb.ly/oVWOM) by MHKstudio is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).
 
