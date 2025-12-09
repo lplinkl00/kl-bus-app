@@ -5,6 +5,7 @@ export interface Stop {
   latitude: number;
   longitude: number;
   code?: string;
+  routeId?: string | null; // Route ID from stops.txt (for train stations)
 }
 
 export interface Route {
@@ -340,6 +341,7 @@ export async function fetchGTFSStops(
         latitude: parseFloat(stop.stop_lat),
         longitude: parseFloat(stop.stop_lon),
         code: stop.stop_code || undefined,
+        routeId: stop.route_id || undefined, // Extract route_id if present in stops.txt
       }));
   } catch (error) {
     console.error('Error fetching GTFS Static stops data:', error);
@@ -589,5 +591,41 @@ export async function fetchMultipleAgencyRoutes(agencies: Agency[]): Promise<Rou
   
   const results = await Promise.all(promises);
   return results.flat();
+}
+
+/**
+ * Train line color mapping
+ */
+export const LINE_COLORS: Record<string, [number, number, number]> = {
+  "MRT": [0, 128, 0],      // green
+  "KJ": [255, 0, 0],        // red
+  "PH": [139, 69, 19],      // brown
+  "AG": [255, 165, 0],     // orange
+  "ktmb": [0, 0, 255],      // blue
+  "PYL": [255, 255, 0],     // yellow
+  "BRT": [0, 100, 0],       // darkgreen
+  "MR": [144, 238, 144],    // lightgreen
+};
+
+/**
+ * Gets the color for a stop based on its route_id
+ * @param stop - Stop object with optional routeId
+ * @returns RGB color array [r, g, b, alpha] or null if not a train station
+ */
+export function getStopColor(stop: Stop): [number, number, number, number] | null {
+  if (!stop.routeId) {
+    return null; // Not a train station
+  }
+  
+  const routeId = stop.routeId.toUpperCase();
+  
+  // Check if route_id starts with any train line prefix
+  for (const [linePrefix, color] of Object.entries(LINE_COLORS)) {
+    if (routeId.startsWith(linePrefix.toUpperCase())) {
+      return [...color, 255]; // Return color with alpha
+    }
+  }
+  
+  return null; // Route ID doesn't match any train line
 }
 

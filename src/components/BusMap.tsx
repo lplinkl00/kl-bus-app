@@ -6,7 +6,7 @@ import { ScenegraphLayer } from '@deck.gl/mesh-layers';
 import type { PickingInfo } from '@deck.gl/core';
 
 import { fetchMultipleAgencies } from '../services/gtfsRealtime';
-import { fetchMultipleAgencyStops, fetchMultipleAgencyRoutes } from '../services/gtfsStatic';
+import { fetchMultipleAgencyStops, fetchMultipleAgencyRoutes, getStopColor as getStopColorFromService } from '../services/gtfsStatic';
 
 import 'mapbox-gl/dist/mapbox-gl.css';
 
@@ -28,6 +28,7 @@ interface Stop {
   latitude: number;
   longitude: number;
   code?: string;
+  routeId?: string | null; // Route ID from stops.txt (for train stations)
 }
 
 interface Route {
@@ -272,18 +273,33 @@ export default function BusMap() {
     }));
   }, [vehicles]);
 
-  // Filter buses based on search query
+  // Filter bus positions to only include those with valid coordinates
+  const validBusPositions = useMemo<BusPosition[]>(() => {
+    return busPositions.filter(bus => 
+      bus && 
+      typeof bus.latitude === 'number' && 
+      !isNaN(bus.latitude) &&
+      typeof bus.longitude === 'number' && 
+      !isNaN(bus.longitude) &&
+      bus.latitude !== 0 && 
+      bus.longitude !== 0 &&
+      typeof bus.bearing === 'number' && 
+      !isNaN(bus.bearing)
+    );
+  }, [busPositions]);
+
+  // Filter buses based on search query (using valid bus positions)
   const filteredBuses = useMemo<BusPosition[]>(() => {
     if (!searchQuery.trim()) {
-      return busPositions;
+      return validBusPositions;
     }
     const query = searchQuery.toLowerCase().trim();
-    return busPositions.filter(bus => 
+    return validBusPositions.filter(bus => 
       bus.id.toLowerCase().includes(query) ||
       (bus.routeId && bus.routeId.toLowerCase().includes(query)) ||
       (bus.tripId && bus.tripId.toLowerCase().includes(query))
     );
-  }, [busPositions, searchQuery]);
+  }, [validBusPositions, searchQuery]);
 
   // Highlight searched bus
   const highlightedBusId = useMemo<string | null>(() => {
@@ -388,6 +404,23 @@ export default function BusMap() {
     );
   }, [stops]);
 
+  // Get the color for a stop based on its route_id from the service
+  const getStopColor = useCallback((stop: Stop): [number, number, number, number] => {
+    // Check if selected (yellow)
+    if (selectedStop && selectedStop.id === stop.id) {
+      return [255, 200, 0, 255]; // Yellow for selected stop
+    }
+    
+    // Get color from service based on route_id in stops.txt
+    const trainColor = getStopColorFromService(stop);
+    if (trainColor) {
+      return trainColor; // Return train station color
+    }
+    
+    // Default blue for regular bus stops
+    return [0, 128, 255, 255];
+  }, [selectedStop]);
+
   // Layers configuration
   // Order matters: stops should be on top so they're visible and clickable
   // Only create layers if we have valid data to prevent WebGL errors
@@ -412,8 +445,8 @@ export default function BusMap() {
     // }
     
     // Bus positions layer - shows 3D bus models or fallback to markers
-    // Use filteredBuses if search is active, otherwise show all buses
-    const busesToShow = searchQuery.trim() ? filteredBuses : busPositions;
+    // Use filteredBuses if search is active, otherwise show all valid buses
+    const busesToShow = searchQuery.trim() ? filteredBuses : validBusPositions;
     if (busesToShow && busesToShow.length > 0) {
       if (busModel) {
         // Use 3D GLTF model with ScenegraphLayer
@@ -477,10 +510,7 @@ export default function BusMap() {
           data: validStops,
           getPosition: d => [d.longitude, d.latitude],
           getRadius: 75, // Increased from 50 to make more visible
-          getFillColor: d => 
-            selectedStop && selectedStop.id === d.id 
-              ? [255, 200, 0, 255] // Yellow for selected stop
-              : [0, 128, 255, 255], // Blue for other stops
+          getFillColor: d => getStopColor(d),
           getLineColor: [255, 255, 255, 255], // White outline
           getLineWidth: 2,
           radiusMinPixels: 6, // Increased from 4
@@ -496,7 +526,7 @@ export default function BusMap() {
     }
     
     return layerList;
-  }, [routes, busPositions, validStops, selectedStop, handleStopClick, handleBusClick, busModel, isMobile, searchQuery, filteredBuses, highlightedBusId]);
+  }, [routes, validBusPositions, validStops, selectedStop, handleStopClick, handleBusClick, busModel, isMobile, searchQuery, filteredBuses, highlightedBusId, getStopColor]);
 
   // Close search results when clicking outside
   useEffect(() => {
@@ -651,25 +681,6 @@ export default function BusMap() {
 
   return (
     <div style={{ width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden' }}>
-      {glError && (
-        <div style={{
-          position: 'absolute',
-          top: 20,
-          left: 20,
-          zIndex: 1001,
-          color: 'white',
-          background: 'rgba(220, 53, 69, 0.9)',
-          padding: '10px 20px',
-          borderRadius: '5px',
-          boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
-          maxWidth: '400px',
-        }}>
-          <strong>WebGL Error:</strong> {glError}
-          <br />
-          <small>Try refreshing the page or updating your graphics drivers.</small>
-        </div>
-      )}
-      
       {/* Search Bar */}
       <div data-search-container style={{
         position: 'absolute',
@@ -803,6 +814,25 @@ export default function BusMap() {
         )}
       </div>
 
+      {glError && (
+        <div style={{
+          position: 'absolute',
+          top: isMobile ? '70px' : '80px',
+          left: isMobile ? '10px' : '20px',
+          zIndex: 1001,
+          color: 'white',
+          background: 'rgba(220, 53, 69, 0.9)',
+          padding: '10px 20px',
+          borderRadius: '5px',
+          boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+          maxWidth: isMobile ? 'calc(100% - 20px)' : '400px',
+        }}>
+          <strong>WebGL Error:</strong> {glError}
+          <br />
+          <small>Try refreshing the page or updating your graphics drivers.</small>
+        </div>
+      )}
+
       {/* Stats Panel */}
       <div style={{
         position: 'absolute',
@@ -816,7 +846,7 @@ export default function BusMap() {
         boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
         fontSize: isMobile ? '12px' : '14px',
       }}>
-        <div>Active Buses: {vehicles.length}</div>
+        <div>Active Buses: {validBusPositions.length} / {vehicles.length}</div>
         {searchQuery.trim() && (
           <div style={{ color: '#fd805d', fontWeight: '600' }}>
             Showing: {filteredBuses.length}
